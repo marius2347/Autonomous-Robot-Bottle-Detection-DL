@@ -1,52 +1,73 @@
-# Autonomous Robot Bottle Detection
+# Autonomous Robot Bottle Detection Using MobileNetV2
 
-## Description
-This project showcases an autonomous robot that can detect the presence of a bottle using Deep Learning and display the result on an LCD screen. The main code resides in `project.ipynb` and covers the essential steps for:
+## Overview
+This repository trains a binary classifier (bottle vs. no bottle) by fine-tuning MobileNetV2 on a custom dataset.
 
-- **Loading and Preprocessing Data**  
-  - Defining and organizing the image dataset 
-  - Applying minimal augmentations (resizing, normalization, color conversion, etc.).
 
-- **Defining and Training the MobileNetV2 Model**  
-  - Using transfer learning.
-  - Choosing loss functions, an optimizer, and evaluation metrics.  
-  - Saving the best model checkpoint based on validation accuracy.
+## Key Steps
 
-- **Evaluation and Validation**  
-  - Splitting data into training, validation, and test sets.  
-  - Plotting accuracy and loss curves, as well as confusion matrices.  
-  - Tuning hyperparameters (learning rate, number of epochs, batch size, etc.).
+1. **Imports & Setup**  
+   - Common libraries: `numpy`, `pandas`, `matplotlib`, `tensorflow.keras`, `keras`, `sklearn`.
+   - `MobileNetV2` backbone loaded with pre-trained weights (no top).
 
-- **Real-Time Inference and Hardware Integration**  
-  - Capturing video frames from the camera mounted on the robot (e.g., a Myria webcam).  
-  - Preprocessing each frame quickly and running inference with the loaded model.  
-  - Displaying the result on an LCD (text: “ESTE STICLĂ!” or “NU ESTE STICLĂ!”) along with the probability score.  
-  - Controlling motors and using an ultrasonic sensor (HC-SR04) to avoid obstacles automatically when a bottle is detected or not.
+2. **Data Loading & Labels**  
+   - Collect filepaths under `./data/Bottles` and `./data/Non_Bottles`.
+   - Assign label `'b'` for bottle images, `'nb'` for no-bottle images.
+   - Total samples: 52,577 (45,272 bottles + 7,305 non-bottles).
 
-- **Hardware Setup**  
-  - A Raspberry Pi, a camera module, an LCD with a keypad, and an ultrasonic sensor.  
-  - A motorized chassis with wheels, motor drivers, cables, and any required USB hub.  
+3. **Train/Validation/Test Split**  
+   - 80% of data for training (further split 80/20 into train/validation), 20% for testing.
+   - Create three Pandas DataFrames with columns `['Images', 'target']` for each split.
 
-The notebook (`project.ipynb`) is organized into the following sections:
-1. **Imports and Initial Setup** (libraries, dataset paths, model paths)  
-2. **Dataset Loading** (reading images, assigning labels)  
-3. **Model Construction** (defining CNN layers, dense layers, dropout, etc.)  
-4. **Training** (compiling the model, running epochs, saving checkpoints)  
-5. **Evaluation** (plotting accuracy/loss, generating validation reports)  
-6. **Inference Code** (a function that takes a frame, applies transformations, and returns the predicted label + probability)  
-7. **Hardware Integration** (example main loop that reads sensor and camera data, calls the inference function, and drives motors/displays results)
+4. **Data Generators**  
+   - **Training**: `ImageDataGenerator` with rescaling and augmentations (flip, rotation, shift, zoom).  
+   - **Validation/Test**: `ImageDataGenerator` with only rescaling.
+   - Use `flow_from_dataframe` to feed images of size 224×224, binary labels (`b=1, nb=0`), batch_size=32.
 
-## Requirements
-- **Operating System**: Linux (ideally Raspberry Pi OS) or any Linux distribution compatible with Python 3.x  
-- **Language**: Python 3.6+  
-- **Python Libraries** (install via `pip`):  
-  - `tensorflow` or `torch` (depending on the notebook implementation)  
-  - `opencv-python` (OpenCV)  
-  - `numpy`, `matplotlib`  
-  - `RPi.GPIO` (and/or `gpiozero`), `picamera` (if using Raspberry Pi)  
-  - Any other dependencies listed in the first cells of `project.ipynb`  
+5. **Model Definition**  
+   - Load `MobileNetV2(include_top=False, weights=<local-.h5-file>, input_shape=(224,224,3))`.  
+   - Append:  
+     - `GlobalAveragePooling2D()`  
+     - `Dense(1024, activation='relu')`  
+     - `Dense(512, activation='relu')`  
+     - `Dense(1, activation='sigmoid')`  
+   - Freeze all base layers initially.
 
-## Screenshots
+6. **Compilation & Checkpointing**  
+   - Compile with `Adam(learning_rate=0.001)`, `binary_crossentropy`, `accuracy`.  
+   - Use `ModelCheckpoint` to save the best model (monitor `val_loss`, mode=`min`).
+
+7. **Training Phase 1 (Feature Extraction)**  
+   - Train for 5 epochs on frozen backbone.  
+   - Save training history to `models/history_initial.pkl`.
+
+8. **Fine-Tuning Phase**  
+   - Unfreeze last 30 layers of MobileNetV2.  
+   - Recompile with lower `learning_rate=0.0001`.  
+   - Train for 5 more epochs.  
+   - Save fine-tuned history to `models/history_finetune.pkl`.
+
+9. **Results & Plots**  
+   - Combine both histories to plot overall training vs. validation loss/accuracy.  
+   - Final validation accuracy reached ≈99.95% with extremely low loss.
+
+10. **Evaluation & Inference**  
+    - Load best model (`./models/best_model.h5`).  
+    - Evaluate on validation/test generator:  
+      ```
+      loss, accuracy = best_model.evaluate(val_generator)
+      ```
+    - Example prediction function:
+      ```python
+      def predict_image(path):
+          img = load_img(path, target_size=(224,224))
+          arr = img_to_array(img) / 255.
+          pred = best_model.predict(np.expand_dims(arr, axis=0))[0][0]
+          return "no bottle" if pred > 0.5 else "bottle"
+      ```
+    - Tested on `./test/20250311_154953.jpg`, yielding “bottle.”
+
+## Example Screenshots
 
 ![No Bottle Detection](no_bottle.jpg)  
 *No Bottle Detection*
@@ -54,6 +75,11 @@ The notebook (`project.ipynb`) is organized into the following sections:
 ![Bottle Detection](bottle.jpg)  
 *Bottle Detection*
 
+## Requirements
+- Python 3.6+  
+- TensorFlow/Keras, OpenCV, NumPy, pandas, scikit-learn, matplotlib, h5py (for saving/loading models)
+
 ## Contact
-For questions, suggestions, or collaboration inquiries, feel free to reach out:  
+For questions or collaboration, contact:  
 **mariusc0023@gmail.com**
+
